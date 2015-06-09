@@ -284,6 +284,9 @@ REQUIRE_OBJECT ( ipstat_cmd );
 #ifdef PROFSTAT_CMD
 REQUIRE_OBJECT ( profstat_cmd );
 #endif
+#ifdef BOOTINFO_CMD
+REQUIRE_OBJECT ( bootinfo_cmd );
+#endif
 
 /*
  * Drag in miscellaneous objects

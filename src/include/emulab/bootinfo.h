@@ -14,12 +14,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #include <ipxe/interface.h>
 #include <ipxe/socket.h>
 
-extern int create_bootinfo ( struct interface *job, const char *hostname,
-			     void ( * callback ) ( struct sockaddr *peer,
-						   unsigned int sequence,
-						   size_t len,
-						   int rc ) );
-
+extern int create_bootinfo_query ( struct interface *job, const char *hostname );
 extern int bootinfo ( const char *hostname );
 
 #endif /* _EMULAB_BOOTINFO_H */

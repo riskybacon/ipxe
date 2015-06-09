@@ -27,6 +27,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <byteswap.h>
 #include <ipxe/refcnt.h>
 #include <ipxe/interface.h>
 #include <ipxe/job.h>
@@ -36,7 +37,9 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #include <ipxe/socket.h>
 #include <ipxe/retry.h>
 #include <ipxe/monojob.h>
+#include <ipxe/tcpip.h>
 #include <emulab/bootinfo.h>
+#include <emulab/bootwhat.h>
 
 /** @file
  *
@@ -79,220 +82,92 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #undef ENOMEM
 #undef EINVAL
 #undef EPROTO_SEQ
+#undef ECONNABORTED
 
 //static int EPROTO_DATA = 1;
 static int ETIMEDOUT = 24;
-static int EPROTO_LEN = 25;
+//static int EPROTO_LEN = 25;
 static int ENOMEM = 23;
-static int EINVAL = 26;
-static int EPROTO_SEQ = 26;
+//static int EINVAL = 26;
+//static int EPROTO_SEQ = 26;
+static int ECONNABORTED = 28;
 
 /*
 static int EPROTOLENT = 24;
 static int EPROTOLENT = 24;
 */
 
-/** A bootinfo */
-struct bootinfo {
-	/** Reference count */
+/** A bootinfo request */
+struct bootinfo_request {
+	/** Reference counter */
 	struct refcnt refcnt;
-
-	/** Job control interface */
-	struct interface job;
+	/** Bootinfo request interface */
+	struct interface request;
 	/** Data transfer interface */
-	struct interface xfer;
-
-	/** Timer */
+	struct interface socket;
+	/** Retry timer */
 	struct retry_timer timer;
-	/** Timeout */
-	unsigned long timeout;
+	struct boot_info bootinfo;
 
-	/** Payload length */
-	size_t len;
-	/** Current sequence number */
-	uint16_t sequence;
-	/** Response for current sequence number is still pending */
-	int pending;
-	/** Number of remaining expiry events (zero to continue indefinitely) */
-	unsigned int remaining;
-
-	/** boot info */
-	//	boot_info_t boot_info, boot_reply;
-
-	/** Return status */
-	int rc;
-
-	/** Callback function
-	 *
-	 * @v src		Source socket address, or NULL
-	 * @v sequence		Sequence number
-	 * @v len		Payload length
-	 * @v rc		Status code
-	 */
-	void ( * callback ) ( struct sockaddr *src, unsigned int sequence,
-			      size_t len, int rc );
 };
-
-/**
- * Display bootinfo result
- *
- * @v src		Source socket address, or NULL
- * @v sequence		Sequence number
- * @v len		Payload length
- * @v rc		Status code
- */
-static void bootinfo_callback ( struct sockaddr *peer, unsigned int sequence,
-			    size_t len, int rc ) {
-
-	/* Display ping response */
-	printf ( "%zd bytes from %s: seq=%d",
-		 len, ( peer ? sock_ntoa ( peer ) : "<none>" ), sequence );
-	if ( rc != 0 )
-		printf ( ": %s", strerror ( rc ) );
-	printf ( "\n" );
-}
 
 int bootinfo (const char * hostname) {
 	int rc;
 
-	/* Create bootinfo job */
-	if ( ( rc = create_bootinfo ( &monojob, hostname,
-				      bootinfo_callback ) ) != 0 ){
+	printf ("bootinfo(%s)\n", hostname);
+
+	if ( ( rc = create_bootinfo_query ( &monojob, hostname ) ) != 0 ) {
 		printf ( "Could not create bootinfo request: %s\n", strerror ( rc ) );
 		return rc;
 	}
 
-	/* Wait for ping to complete */
+	/* Wait for bootinfo to complete */
 	if ( ( rc = monojob_wait ( NULL, 0 ) ) != 0 ) {
-		printf ( "Finished: %s\n", strerror ( rc ) );
+		printf ( "Bootinfo finished: %s\n", strerror ( rc ) );
 		return rc;
 	}
 
-	return 0;
 
-  return 0;
-}
-
-/**
- * Generate payload
- *
- * @v bootinfo		Bootinfo
- * @v data		Data buffer
- */
-static void bootinfo_generate ( struct bootinfo *bootinfo, void *data ) {
-	uint8_t *bytes = data;
-	unsigned int i;
-
-	/* Generate byte sequence */
-	for ( i = 0 ; i < bootinfo->len ; i++ )
-		bytes[i] = ( i & 0xff );
-}
-
-/**
- * Verify payload
- *
- * @v bootinfo		Bootinfo
- * @v data		Data buffer
- * @ret rc		Return status code
- */
-static int bootinfo_verify ( struct bootinfo *bootinfo __unused, const void *data __unused) {
-#if 0
-	const uint8_t *bytes = data;
-	unsigned int i;
-	/* Check byte sequence */
-	for ( i = 0 ; i < bootinfo->len ; i++ ) {
-		if ( bytes[i] != ( i & 0xff ) )
-			return -EPROTO_DATA;
-	}
-#endif
 	return 0;
 }
 
 /**
- * Close bootinfo
+ * Mark bootinfo request as complete
  *
- * @v bootinfo		Bootinfo
- * @v rc		Reason for close
+ * @v bootinfo		Bootinfo request
+ * @v rc		Return status code
  */
-static void bootinfo_close ( struct bootinfo *bootinfo, int rc ) {
+static void bootinfo_done ( struct bootinfo_request *bootinfo, int rc ) {
+	printf ("bootinfo_done()\n");
 
-	/* Stop timer */
+	/* Stop the retry timer */
 	stop_timer ( &bootinfo->timer );
 
 	/* Shut down interfaces */
-	intf_shutdown ( &bootinfo->xfer, rc );
-	intf_shutdown ( &bootinfo->job, rc );
+	intf_shutdown ( &bootinfo->socket, rc );
+	intf_shutdown ( &bootinfo->request, rc );
 }
 
 /**
- * Handle data transfer window change
+ * Send bootinfo request
  *
- * @v bootinfo		Bootinfo
+ * @v bootinfo		Bootinfo request
+ * @ret rc		Return status code
  */
-static void bootinfo_window_changed ( struct bootinfo *bootinfo ) {
-
-	/* Do nothing if timer is already running */
-	if ( timer_running ( &bootinfo->timer ) )
-		return;
-
-	/* Start timer when window opens for the first time */
-	if ( xfer_window ( &bootinfo->xfer ) )
-		start_timer_nodelay ( &bootinfo->timer );
-}
-
-/**
- * Handle timer expiry
- *
- * @v timer		Timer
- * @v over		Failure indicator
- */
-static void bootinfo_expired ( struct retry_timer *timer, int over __unused ) {
-	struct bootinfo *bootinfo = container_of ( timer, struct bootinfo, timer );
-	struct xfer_metadata meta;
-	struct io_buffer *iobuf;
-	int rc;
-
-	/* If no response has been received, notify the callback function */
-	if ( bootinfo->pending && bootinfo->callback )
-		bootinfo->callback ( NULL, bootinfo->sequence, 0, -ETIMEDOUT );
-
-	/* Check for termination */
-	if ( bootinfo->remaining && ( --bootinfo->remaining == 0 ) ) {
-		bootinfo_close ( bootinfo, bootinfo->rc );
-		return;
-	}
-
-	/* Increase sequence number */
-	bootinfo->sequence++;
-
-	/* Restart timer.  Do this before attempting to transmit, in
-	 * case the transmission attempt fails.
+static int bootinfo_send_packet ( struct bootinfo_request *bootinfo ) {
+	boot_info_t boot_info;
+	printf ("bootinfo_send_packet()\n");
+	/*
+	 * Create a bootinfo request packet and send it.
 	 */
-	start_timer_fixed ( &bootinfo->timer, bootinfo->timeout );
-	bootinfo->pending = 1;
+	memset ( &boot_info, 0, sizeof(boot_info) );
+	boot_info.version = BIVERSION_CURRENT;
+	boot_info.opcode  = BIOPCODE_BOOTWHAT_REQUEST;
+	/* Start retransmission timer */
+	start_timer ( &bootinfo->timer );
 
-	/* Allocate I/O buffer */
-	iobuf = xfer_alloc_iob ( &bootinfo->xfer, bootinfo->len );
-	if ( ! iobuf ) {
-		DBGC ( bootinfo, "BOOTINFO %p could not allocate I/O buffer\n",
-		       bootinfo );
-		return;
-	}
-
-	/* Generate payload */
-	bootinfo_generate ( bootinfo, iob_put ( iobuf, bootinfo->len ) );
-
-	/* Generate metadata */
-	memset ( &meta, 0, sizeof ( meta ) );
-	meta.flags = XFER_FL_ABS_OFFSET;
-	meta.offset = bootinfo->sequence;
-
-	/* Transmit packet */
-	if ( ( rc = xfer_deliver ( &bootinfo->xfer, iobuf, &meta ) ) != 0 ) {
-		DBGC ( bootinfo, "BOOTINFO %p could not transmit: %s\n",
-		       bootinfo, strerror ( rc ) );
-		return;
-	}
+	/* Send the data */
+	return xfer_deliver_raw ( &bootinfo->socket, &boot_info, sizeof( boot_info ) );
 }
 
 /**
@@ -303,154 +178,169 @@ static void bootinfo_expired ( struct retry_timer *timer, int over __unused ) {
  * @v meta		Data transfer metadata
  * @ret rc		Return status code
  */
-static int bootinfo_deliver ( struct bootinfo *bootinfo, struct io_buffer *iobuf,
-			    struct xfer_metadata *meta ) {
-	size_t len = iob_len ( iobuf );
-	uint16_t sequence = meta->offset;
-	int terminate = 0;
-	int rc;
+static int bootinfo_xfer_deliver ( struct bootinfo_request *bootinfo,
+				   struct io_buffer *iobuf,
+				   struct xfer_metadata *meta __unused ) {
+	printf ("bootinfo_xfer_deliver()\n");
+	boot_info_t *boot_reply = iobuf->data;
+	boot_what_t *boot_whatp = (boot_what_t *) boot_reply->data;
 
-	/* Clear response pending flag, if applicable */
-	if ( sequence == bootinfo->sequence )
-		bootinfo->pending = 0;
-
-	/* Check for errors */
-	if ( len != bootinfo->len ) {
-		/* Incorrect length: terminate immediately if we are
-		 * not pinging indefinitely.
-		 */
-		DBGC ( bootinfo, "BOOTINFO %p received incorrect length %zd "
-		       "(expected %zd)\n", bootinfo, len, bootinfo->len );
-		rc = -EPROTO_LEN;
-		terminate = ( bootinfo->remaining != 0 );
-	} else if ( ( rc = bootinfo_verify ( bootinfo, iobuf->data ) ) != 0 ) {
-		/* Incorrect data: terminate immediately if we are not
-		 * pinging indefinitely.
-		 */
-		DBGC ( bootinfo, "BOOTINFO %p received incorrect data:\n", bootinfo );
-		DBGC_HDA ( bootinfo, 0, iobuf->data, iob_len ( iobuf ) );
-		terminate = ( bootinfo->remaining != 0 );
-	} else if ( sequence != bootinfo->sequence ) {
-		/* Incorrect sequence number (probably a delayed response):
-		 * report via callback but otherwise ignore.
-		 */
-		DBGC ( bootinfo, "BOOTINFO %p received sequence %d (expected %d)\n",
-		       bootinfo, sequence, bootinfo->sequence );
-		rc = -EPROTO_SEQ;
-		terminate = 0;
-	} else {
-		/* Success: record that a packet was successfully received,
-		 * and terminate if we expect to send no further packets.
-		 */
-		rc = 0;
-		bootinfo->rc = 0;
-		terminate = ( bootinfo->remaining == 1 );
+	switch (boot_whatp->type) {
+	case BIBOOTWHAT_TYPE_PART:
+		printf ("BIBOOTWHAT_TYPE_PART\n");
+		printf("partition:%d", boot_whatp->what.partition);
+		if (boot_whatp->cmdline[0])
+			printf(" %s", boot_whatp->cmdline);
+		printf("\n");
+		//goto done;
+		break;
+	case BIBOOTWHAT_TYPE_WAIT:
+		printf ("BIBOOTWHAT_TYPE_WAIT\n");
+		//		if (debug)
+		//			printf("wait: now polling\n");
+		//		pollmode = 1;
+		//goto poll;
+		break;
+	case BIBOOTWHAT_TYPE_REBOOT:
+		printf ("BIBOOTWHAT_TYPE_REBOOT\n");
+		//		printf("reboot\n");
+		//goto done;
+		break;
+	case BIBOOTWHAT_TYPE_AUTO:
+		printf ("BIBOOTWHT_TYPE_AUTO\n");
+		//		if (debug)
+		//			printf("query: will query again\n");
+		//goto again;
+		break;
+	case BIBOOTWHAT_TYPE_MFS:
+		printf("BIBOOTWHAT_TYPE_MFS: mfs:%s\n", boot_whatp->what.mfs);
+		//	goto done;
+		break;
 	}
 
-	/* Discard I/O buffer */
-	free_iob ( iobuf );
+	/* Stop the retry timer.  After this point, each code path
+	 * must either restart the timer by calling dns_send_packet(),
+	 * or mark the DNS operation as complete by calling
+	 * dns_done()
+	 */
+	stop_timer ( &bootinfo->timer );
 
-	/* Notify callback function, if applicable */
-	if ( bootinfo->callback )
-		bootinfo->callback ( meta->src, sequence, len, rc );
-
-	/* Terminate if applicable */
-	if ( terminate )
-		bootinfo_close ( bootinfo, rc );
-
-	return rc;
+	
+	return 0;
 }
-
-/** Bootinfo data transfer interface operations */
-static struct interface_operation bootinfo_xfer_op[] = {
-	INTF_OP ( xfer_deliver, struct bootinfo *, bootinfo_deliver ),
-	INTF_OP ( xfer_window_changed, struct bootinfo *, bootinfo_window_changed ),
-	INTF_OP ( intf_close, struct bootinfo *, bootinfo_close ),
-};
-
-/** Bootinfo data transfer interface descriptor */
-static struct interface_descriptor bootinfo_xfer_desc =
-	INTF_DESC ( struct bootinfo, xfer, bootinfo_xfer_op );
-
-/** Bootinfo job control interface operations */
-static struct interface_operation bootinfo_job_op[] = {
-	INTF_OP ( intf_close, struct bootinfo *, bootinfo_close ),
-};
-
-/** Bootinfo job control interface descriptor */
-static struct interface_descriptor bootinfo_job_desc =
-	INTF_DESC ( struct bootinfo, job, bootinfo_job_op );
 
 /**
- * Create bootinfo
+ * Handle bootinfo retransmission timer expiry
  *
- * @v job		Job control interface
- * @v hostname		Hostname to ping
- * @v timeout		Timeout (in ticks)
- * @v len		Payload length
- * @v count		Number of packets to send (or zero for no limit)
- * @v callback		Callback function (or NULL)
- * @ret rc		Return status code
+ * @v timer		Retry timer
+ * @v fail		Failure indicator
  */
-int create_bootinfo ( struct interface *job, const char *hostname,
-		    void ( * callback ) ( struct sockaddr *src,
-					  unsigned int sequence, size_t len,
-					  int rc ) ) {
-	struct bootinfo *bootinfo;
-	int rc;
+static void bootinfo_timer_expired ( struct retry_timer *timer __unused, int fail ) {
+	printf ("bootinfo_timer_expired()\n");
 
-	unsigned long timeout = 10;
-	size_t len = 64;
-	unsigned int count = 4;
+	struct bootinfo_request *bootinfo =
+		container_of ( timer, struct bootinfo_request, timer );
 
-	printf ("create_bootinfo 1\n");
-
-	/* Sanity check */
-	if ( ! timeout )
-		return -EINVAL;
-
-	printf ("create_bootinfo 2\n");
-
-	/* Allocate and initialise structure */
-	bootinfo = zalloc ( sizeof ( *bootinfo ) );
-	if ( ! bootinfo ) {
-		return -ENOMEM;
+	if ( fail ) {
+		printf ( "bootinfo_timer_expired: calling bootinfo_done\n" );
+		bootinfo_done ( bootinfo, -ETIMEDOUT );
+	} else {
+		printf ( "bootinfo_timer_expired: calling bootinfo_send_packet\n" );
+		bootinfo_send_packet ( bootinfo );
 	}
-
-	printf ("create_bootinfo 3\n");
-
-	ref_init ( &bootinfo->refcnt, NULL );
-	intf_init ( &bootinfo->job, &bootinfo_job_desc, &bootinfo->refcnt );
-	intf_init ( &bootinfo->xfer, &bootinfo_xfer_desc, &bootinfo->refcnt );
-	timer_init ( &bootinfo->timer, bootinfo_expired, &bootinfo->refcnt );
-	bootinfo->timeout = timeout;
-	bootinfo->len = len;
-	bootinfo->remaining = ( count ? ( count + 1 /* Initial packet */ ) : 0 );
-	bootinfo->callback = callback;
-	bootinfo->rc = -ETIMEDOUT;
-
-	printf ("create_bootinfo 4\n");
-
-	/* Open socket */
-	if ( ( rc = xfer_open_named_socket ( &bootinfo->xfer, SOCK_ECHO, NULL,
-					     hostname, NULL ) ) != 0 ) {
-		DBGC ( bootinfo, "BOOTINFO %p could not open socket: %s\n",
-		       bootinfo, strerror ( rc ) );
-		goto err;
-	}
-
-	printf ("create_bootinfo 5\n");
-
-	/* Attach parent interface, mortalise self, and return */
-	intf_plug_plug ( &bootinfo->job, job );
-	ref_put ( &bootinfo->refcnt );
-	return 0;
-
- err:
-	printf ("create_bootinfo 6\n");
-
-	bootinfo_close ( bootinfo, rc );
-	ref_put ( &bootinfo->refcnt );
-	return rc;
 }
 
+/**
+ * Receive new data
+ *
+ * @v bootinfo		Bootinfo request
+ * @v rc		Reason for close
+ */
+static void bootinfo_xfer_close ( struct bootinfo_request *bootinfo __unused, int rc __unused) {
+	printf ("bootinfo_xfer_close()\n");
+
+	if ( ! rc )
+		rc = -ECONNABORTED;
+
+	bootinfo_done ( bootinfo, rc );
+}
+
+/** Bootinfo socket interface operations */
+static struct interface_operation bootinfo_socket_operations[] = {
+	INTF_OP ( xfer_deliver, struct bootinfo_request *, bootinfo_xfer_deliver ),
+	INTF_OP ( intf_close, struct bootinfo_request *, bootinfo_xfer_close ),
+};
+
+/** Bootinfo socket interface descriptor */
+static struct interface_descriptor bootinfo_socket_desc =
+	INTF_DESC ( struct bootinfo_request, socket, bootinfo_socket_operations );
+
+/** Bootinfo request interface operations */
+static struct interface_operation bootinfo_request_op[] = {
+	INTF_OP ( intf_close, struct bootinfo_request *, bootinfo_done ),
+};
+
+/** Bootinfo request interface descriptor */
+static struct interface_descriptor bootinfo_request_desc =
+	INTF_DESC ( struct bootinfo_request, request, bootinfo_request_op );
+
+/**v
+ * bootinfo query
+ *
+ * @v resolv		Name resolution interface
+ * @v name		Name to resolve
+ * @v sa		Socket address to fill in
+ * @ret rc		Return status code
+ */
+int create_bootinfo_query ( struct interface * job, const char *hostname ) {
+
+	struct bootinfo_request *bootinfo;
+	struct sockaddr_tcpip server;
+	struct sockaddr_tcpip local;
+	int rc;
+
+	printf ("Bootinfo query for host %s\n", hostname);
+
+	/* Allocate DNS structure */
+	bootinfo = zalloc ( sizeof ( *bootinfo ) );
+	if ( ! bootinfo ) {
+		rc = -ENOMEM;
+		return rc;
+	}
+
+	printf ("create_bootinfo_query 1 v 0014\n");
+
+	ref_init ( &bootinfo->refcnt, NULL );
+	intf_init ( &bootinfo->request, &bootinfo_request_desc, &bootinfo->refcnt );
+	intf_init ( &bootinfo->socket, &bootinfo_socket_desc, &bootinfo->refcnt );
+	timer_init ( &bootinfo->timer, bootinfo_timer_expired, &bootinfo->refcnt );
+
+	printf ("create_bootinfo_query 2\n");
+
+	memset ( &server, 0, sizeof ( server ) );
+	server.st_port = htons ( BOOTWHAT_DSTPORT );
+
+	memset ( &local, 0, sizeof ( local ) );
+	local.st_port = htons ( BOOTWHAT_SRCPORT );
+
+	/* Open UDP connection */
+	if ( ( rc = xfer_open_named_socket ( &bootinfo->socket, SOCK_DGRAM,
+					     ( struct sockaddr * ) &server,
+					     hostname,
+					     ( struct sockaddr * ) &local ) ) != 0 ) {
+		printf ( "Could not open bootinfo socket on %s\n", hostname);
+		DBGC ( bootinfo, "bootinfo %p could not open socket: %s\n",
+		       bootinfo, strerror ( rc ) );
+		return rc;
+	}
+
+	printf ("create_bootinfo_query 3\n");
+	/* Start timer to trigger first packet */
+	start_timer_nodelay ( &bootinfo->timer );
+
+	/* Attach parent interface, mortalise self, and return */
+	intf_plug_plug ( &bootinfo->request, job );
+	ref_put ( &bootinfo->refcnt );
+	printf ("create_bootinfo_query 4\n");
+	return 0;	
+}

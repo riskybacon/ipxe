@@ -80,7 +80,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #undef EINVAL
 #undef EPROTO_SEQ
 
-static int EPROTO_DATA = 1;
+//static int EPROTO_DATA = 1;
 static int ETIMEDOUT = 24;
 static int EPROTO_LEN = 25;
 static int ENOMEM = 23;
@@ -115,6 +115,10 @@ struct bootinfo {
 	int pending;
 	/** Number of remaining expiry events (zero to continue indefinitely) */
 	unsigned int remaining;
+
+	/** boot info */
+	//	boot_info_t boot_info, boot_reply;
+
 	/** Return status */
 	int rc;
 
@@ -150,23 +154,17 @@ static void bootinfo_callback ( struct sockaddr *peer, unsigned int sequence,
 
 int bootinfo (const char * hostname) {
 	int rc;
-	int quiet = 0;
-	unsigned long timeout = 10;
-	size_t len = 56;
-	unsigned int count = 4;
 
-	printf ("bootinfo 1\n");
 	/* Create bootinfo job */
-	if ( ( rc = create_bootinfo ( &monojob, hostname, timeout, len, count,
-				    ( quiet ? NULL : bootinfo_callback ) ) ) != 0 ){
-		printf ( "Could not start bootinfo: %s\n", strerror ( rc ) );
+	if ( ( rc = create_bootinfo ( &monojob, hostname,
+				      bootinfo_callback ) ) != 0 ){
+		printf ( "Could not create bootinfo request: %s\n", strerror ( rc ) );
 		return rc;
 	}
 
 	/* Wait for ping to complete */
 	if ( ( rc = monojob_wait ( NULL, 0 ) ) != 0 ) {
-		if ( ! quiet )
-			printf ( "Finished: %s\n", strerror ( rc ) );
+		printf ( "Finished: %s\n", strerror ( rc ) );
 		return rc;
 	}
 
@@ -197,16 +195,16 @@ static void bootinfo_generate ( struct bootinfo *bootinfo, void *data ) {
  * @v data		Data buffer
  * @ret rc		Return status code
  */
-static int bootinfo_verify ( struct bootinfo *bootinfo, const void *data ) {
+static int bootinfo_verify ( struct bootinfo *bootinfo __unused, const void *data __unused) {
+#if 0
 	const uint8_t *bytes = data;
 	unsigned int i;
-
 	/* Check byte sequence */
 	for ( i = 0 ; i < bootinfo->len ; i++ ) {
 		if ( bytes[i] != ( i & 0xff ) )
 			return -EPROTO_DATA;
 	}
-
+#endif
 	return 0;
 }
 
@@ -395,12 +393,15 @@ static struct interface_descriptor bootinfo_job_desc =
  * @ret rc		Return status code
  */
 int create_bootinfo ( struct interface *job, const char *hostname,
-		    unsigned long timeout, size_t len, unsigned int count,
 		    void ( * callback ) ( struct sockaddr *src,
 					  unsigned int sequence, size_t len,
 					  int rc ) ) {
 	struct bootinfo *bootinfo;
 	int rc;
+
+	unsigned long timeout = 10;
+	size_t len = 64;
+	unsigned int count = 4;
 
 	printf ("create_bootinfo 1\n");
 

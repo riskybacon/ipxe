@@ -39,6 +39,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #include <ipxe/retry.h>
 #include <ipxe/monojob.h>
 #include <ipxe/tcpip.h>
+#include <ipxe/settings.h>
 #include <emulab/bootinfo.h>
 #include <emulab/bootwhat.h>
 
@@ -170,6 +171,56 @@ static int bootinfo_send_packet ( struct bootinfo_request *bootinfo ) {
 	return xfer_deliver_raw ( &bootinfo->socket, &boot_info, sizeof( boot_info ) );
 }
 
+static void bootinfo_setting( struct settings **settings,
+			      char *setting_name,
+			      const struct setting_type *setting_type,
+			      const void *data,
+			      size_t len)
+{
+	int rc = 0;
+	struct setting setting;
+
+	/* Parse specified setting name */
+	if ( ( rc = parse_setting_name ( setting_name,
+					 autovivify_child_settings, 
+					 settings,
+					 &setting ) ) != 0 ) {
+		printf ( "Could not set %s\n", setting_name);
+	}
+
+	/* Apply default type if necessary */
+	if ( ! setting.type ) {
+		setting.type = setting_type;
+	}
+
+	/* Store in specified setting */
+	if ( ( rc = store_setting ( *settings, &setting, data, len ) ) != 0 ) {
+		printf ( "Could not store setting %s\n", setting_name);
+	}
+}
+
+static void bootinfo_setting_uint8( struct settings **settings,
+				   char *setting_name,
+				   uint8_t value)
+{
+	bootinfo_setting(settings,
+			 setting_name,
+			 &setting_type_uint8,
+			 &value,
+			 sizeof(uint8_t));
+}
+
+static void bootinfo_setting_string ( struct settings **settings,
+				      char *setting_name,
+				      char *value)
+{
+	bootinfo_setting ( settings,
+			   setting_name,
+			   &setting_type_string,
+			   value,
+			   strlen(value) );
+}
+
 /**
  * Handle received data
  *
@@ -181,51 +232,43 @@ static int bootinfo_send_packet ( struct bootinfo_request *bootinfo ) {
 static int bootinfo_xfer_deliver ( struct bootinfo_request *bootinfo,
 				   struct io_buffer *iobuf,
 				   struct xfer_metadata *meta __unused ) {
-	printf ("bootinfo_xfer_deliver()\n");
 	boot_info_t *boot_reply = iobuf->data;
 	boot_what_t *boot_whatp = (boot_what_t *) boot_reply->data;
+	struct settings *settings;
+	int rc = 0;
+
+	printf ("bootinfo_xfer_deliver()\n");
 
 	switch (boot_whatp->type) {
 	case BIBOOTWHAT_TYPE_PART:
-		printf ("BIBOOTWHAT_TYPE_PART\n");
-		printf("partition:%d", boot_whatp->what.partition);
-		if (boot_whatp->cmdline[0])
-			printf(" %s", boot_whatp->cmdline);
-		printf("\n");
-		//goto done;
+		bootinfo_setting_uint8(&settings, "bibootwhat_type_part", 1);
+		bootinfo_setting_uint8(&settings, "bibootwhat_part", boot_whatp->what.partition);
+
+		//		if (boot_whatp->cmdline[0]) {
+		//			bootinfo_setting_string(&settings, "bibootwhat_cmdline", boot_whatp->cmdline[0]);
+		//}
 		break;
+
 	case BIBOOTWHAT_TYPE_WAIT:
-		printf ("BIBOOTWHAT_TYPE_WAIT\n");
-		//		if (debug)
-		//			printf("wait: now polling\n");
-		//		pollmode = 1;
-		//goto poll;
+		bootinfo_setting_uint8(&settings, "bibootwhat_type_wait", 1);
 		break;
+
 	case BIBOOTWHAT_TYPE_REBOOT:
-		printf ("BIBOOTWHAT_TYPE_REBOOT\n");
-		//		printf("reboot\n");
-		//goto done;
+		bootinfo_setting_uint8(&settings, "bibootwhat_type_reboot", 1);
 		break;
+
 	case BIBOOTWHAT_TYPE_AUTO:
-		printf ("BIBOOTWHT_TYPE_AUTO\n");
-		//		if (debug)
-		//			printf("query: will query again\n");
-		//goto again;
+		bootinfo_setting_uint8(&settings, "bibootwhat_type_auto", 1);
 		break;
+
 	case BIBOOTWHAT_TYPE_MFS:
-		printf("BIBOOTWHAT_TYPE_MFS: mfs:%s\n", boot_whatp->what.mfs);
-		//	goto done;
+		bootinfo_setting_uint8(&settings, "bibootwhat_type_mfs", 1);
+		bootinfo_setting_string(&settings, "bibootwhat_mfs", boot_whatp->what.mfs);
 		break;
 	}
 
-	/* Stop the retry timer.  After this point, each code path
-	 * must either restart the timer by calling dns_send_packet(),
-	 * or mark the DNS operation as complete by calling
-	 * dns_done()
-	 */
-	stop_timer ( &bootinfo->timer );
 
-	
+	bootinfo_done(bootinfo, rc);
 	return 0;
 }
 
@@ -308,7 +351,7 @@ int create_bootinfo_query ( struct interface * job, const char *hostname ) {
 		return rc;
 	}
 
-	printf ("create_bootinfo_query 1 v 0014\n");
+	printf ("create_bootinfo_query 1 v 0020\n");
 
 	ref_init ( &bootinfo->refcnt, NULL );
 	intf_init ( &bootinfo->request, &bootinfo_request_desc, &bootinfo->refcnt );

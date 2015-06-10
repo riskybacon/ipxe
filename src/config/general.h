@@ -119,6 +119,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #define LOGIN_CMD		/* Login command */
 #define SYNC_CMD		/* Sync command */
 #define BOOTINFO_CMD            /* Bootinfo command */
+#define EVENT_CMD               /* Event command */
 //#define NSLOOKUP_CMD		/* DNS resolving command */
 //#define TIME_CMD		/* Time commands */
 //#define DIGEST_CMD		/* Image crypto digest commands */

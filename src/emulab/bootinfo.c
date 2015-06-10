@@ -327,7 +327,7 @@ static struct interface_operation bootinfo_request_op[] = {
 static struct interface_descriptor bootinfo_request_desc =
 	INTF_DESC ( struct bootinfo_request, request, bootinfo_request_op );
 
-/**v
+/**
  * bootinfo query
  *
  * @v resolv		Name resolution interface

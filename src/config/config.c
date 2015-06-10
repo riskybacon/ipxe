@@ -287,6 +287,9 @@ REQUIRE_OBJECT ( profstat_cmd );
 #ifdef BOOTINFO_CMD
 REQUIRE_OBJECT ( bootinfo_cmd );
 #endif
+#ifdef EVENT_CMD
+REQUIRE_OBJECT ( event_cmd );
+#endif
 
 /*
  * Drag in miscellaneous objects

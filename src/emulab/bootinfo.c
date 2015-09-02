@@ -214,11 +214,47 @@ static void bootinfo_setting_string ( struct settings **settings,
 				      char *setting_name,
 				      char *value)
 {
+	DBGC ( setting_name, "bootinfo %p bootinfo_setting_string(%s, %s)", setting_name, setting_name, value );
+
 	bootinfo_setting ( settings,
 			   setting_name,
 			   &setting_type_string,
 			   value,
 			   strlen(value) );
+}
+
+static void
+print_bootwhat(boot_what_t *bootinfo)
+{
+	printf ("print_bootwhat(type = %d)\n", bootinfo->type);
+        switch (bootinfo->type) {
+        case BIBOOTWHAT_TYPE_PART:
+                printf("boot from partition %d\n",
+                       bootinfo->what.partition);
+                break;  
+        case BIBOOTWHAT_TYPE_SYSID:
+                printf("boot from partition with sysid %d\n",
+                       bootinfo->what.sysid);
+                break;  
+        case BIBOOTWHAT_TYPE_MB:
+                printf("boot multiboot image %s:%s\n",
+                       inet_ntoa(bootinfo->what.mb.tftp_ip),
+                       bootinfo->what.mb.filename);
+                break;  
+        case BIBOOTWHAT_TYPE_WAIT:
+                printf("No boot; waiting till allocated\n");
+                break;  
+        case BIBOOTWHAT_TYPE_MFS:
+                printf("boot from MFS %s\n", bootinfo->what.mfs);
+                break;  
+	case BIBOOTWHAT_TYPE_DISKPART:
+		printf ("boot from disk part %d\n",
+			bootinfo->what.partition);
+		break;
+        }       
+        if (bootinfo->cmdline[0])
+                printf("Command line %s\n", bootinfo->cmdline);
+        
 }
 
 /**
@@ -237,31 +273,41 @@ static int bootinfo_xfer_deliver ( struct bootinfo_request *bootinfo,
 	struct settings *settings;
 	int rc = 0;
 
-	printf ("bootinfo_xfer_deliver()\n");
+	printf ("bootinfo_xfer_deliver(type = %d)\n", boot_whatp->type);
+
+	print_bootwhat(boot_whatp);
 
 	switch (boot_whatp->type) {
 	case BIBOOTWHAT_TYPE_PART:
+		printf("BOOTINFO_TYPE_PART: %d", boot_whatp->what.partition);
 		bootinfo_setting_uint8(&settings, "bibootwhat_type_part", 1);
 		bootinfo_setting_uint8(&settings, "bibootwhat_part", boot_whatp->what.partition);
 
-		//		if (boot_whatp->cmdline[0]) {
-		//			bootinfo_setting_string(&settings, "bibootwhat_cmdline", boot_whatp->cmdline[0]);
-		//}
+		if (boot_whatp->cmdline[0]) {
+			bootinfo_setting_string(&settings, "bibootwhat_cmdline", boot_whatp->cmdline);
+			printf (" %s", boot_whatp->cmdline);
+		} else {
+			printf ("\n");
+		}
 		break;
 
 	case BIBOOTWHAT_TYPE_WAIT:
+		printf ("BIBOOTWHAT_TYPE_WAIT\n");
 		bootinfo_setting_uint8(&settings, "bibootwhat_type_wait", 1);
 		break;
 
 	case BIBOOTWHAT_TYPE_REBOOT:
+		printf ("BIBOOTWHAT_TYPE_REBOOT\n");
 		bootinfo_setting_uint8(&settings, "bibootwhat_type_reboot", 1);
 		break;
 
 	case BIBOOTWHAT_TYPE_AUTO:
+		printf ("BIBOOTWHAT_TYPE_AUTO\n");
 		bootinfo_setting_uint8(&settings, "bibootwhat_type_auto", 1);
 		break;
 
 	case BIBOOTWHAT_TYPE_MFS:
+		printf ("BIBOOTWHAT_TYPE_MFS %s\n", boot_whatp->what.mfs);
 		bootinfo_setting_uint8(&settings, "bibootwhat_type_mfs", 1);
 		bootinfo_setting_string(&settings, "bibootwhat_mfs", boot_whatp->what.mfs);
 		break;
@@ -351,7 +397,7 @@ int create_bootinfo_query ( struct interface * job, const char *hostname ) {
 		return rc;
 	}
 
-	printf ("create_bootinfo_query 1 v 0020\n");
+	printf ("create_bootinfo_query 1 v 0022\n");
 
 	ref_init ( &bootinfo->refcnt, NULL );
 	intf_init ( &bootinfo->request, &bootinfo_request_desc, &bootinfo->refcnt );

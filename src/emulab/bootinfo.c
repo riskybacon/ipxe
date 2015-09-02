@@ -115,7 +115,7 @@ struct bootinfo_request {
 int bootinfo (const char * hostname) {
 	int rc;
 
-	printf ("bootinfo(%s)\n", hostname);
+	//	printf ("bootinfo(%s)\n", hostname);
 
 	if ( ( rc = create_bootinfo_query ( &monojob, hostname ) ) != 0 ) {
 		printf ( "Could not create bootinfo request: %s\n", strerror ( rc ) );
@@ -139,7 +139,7 @@ int bootinfo (const char * hostname) {
  * @v rc		Return status code
  */
 static void bootinfo_done ( struct bootinfo_request *bootinfo, int rc ) {
-	printf ("bootinfo_done()\n");
+	//	printf ("bootinfo_done()\n");
 
 	/* Stop the retry timer */
 	stop_timer ( &bootinfo->timer );
@@ -157,7 +157,7 @@ static void bootinfo_done ( struct bootinfo_request *bootinfo, int rc ) {
  */
 static int bootinfo_send_packet ( struct bootinfo_request *bootinfo ) {
 	boot_info_t boot_info;
-	printf ("bootinfo_send_packet()\n");
+	//	printf ("bootinfo_send_packet()\n");
 	/*
 	 * Create a bootinfo request packet and send it.
 	 */
@@ -169,6 +169,25 @@ static int bootinfo_send_packet ( struct bootinfo_request *bootinfo ) {
 
 	/* Send the data */
 	return xfer_deliver_raw ( &bootinfo->socket, &boot_info, sizeof( boot_info ) );
+}
+
+static void bootinfo_clear_setting( struct settings **settings,
+				    char *setting_name) {
+	int rc = 0;
+	struct setting setting;
+
+	/* Parse specified setting name */
+	if ( ( rc = parse_setting_name ( setting_name,
+					 autovivify_child_settings, 
+					 settings,
+					 &setting ) ) != 0 ) {
+		printf ( "Could not set %s\n", setting_name);
+	}
+
+	/* Store in specified setting */
+	if ( ( rc = store_setting ( *settings, &setting, NULL, 0 ) ) != 0 ) {
+		printf ( "Could not clear setting %s\n", setting_name);
+	}
 }
 
 static void bootinfo_setting( struct settings **settings,
@@ -223,10 +242,11 @@ static void bootinfo_setting_string ( struct settings **settings,
 			   strlen(value) );
 }
 
+#if 0
 static void
 print_bootwhat(boot_what_t *bootinfo)
 {
-	printf ("print_bootwhat(type = %d)\n", bootinfo->type);
+	printf ("print_bootwhat(type = %d )\n", bootinfo->type);
         switch (bootinfo->type) {
         case BIBOOTWHAT_TYPE_PART:
                 printf("boot from partition %d\n",
@@ -256,6 +276,22 @@ print_bootwhat(boot_what_t *bootinfo)
                 printf("Command line %s\n", bootinfo->cmdline);
         
 }
+#endif
+
+/**
+ * Clear bootinfo related settings
+ */
+static void
+bootinfo_clear_all_settings( struct settings **settings ) {
+	// This should probably be an array of strings and a loop
+	bootinfo_clear_setting(settings, "bibootwhat_type_part");
+	bootinfo_clear_setting(settings, "bibootwhat_part");
+	bootinfo_clear_setting(settings, "bibootwhat_cmdline");
+	bootinfo_clear_setting(settings, "bibootwhat_type_reboot");
+	bootinfo_clear_setting(settings, "bibootwhat_type_auto");
+	bootinfo_clear_setting(settings, "bibootwhat_type_mfs");
+	bootinfo_clear_setting(settings, "bibootwhat_mfs");
+}
 
 /**
  * Handle received data
@@ -273,41 +309,42 @@ static int bootinfo_xfer_deliver ( struct bootinfo_request *bootinfo,
 	struct settings *settings;
 	int rc = 0;
 
-	printf ("bootinfo_xfer_deliver(type = %d)\n", boot_whatp->type);
+	//	printf ("bootinfo_xfer_deliver(type = %d)\n", boot_whatp->type);
 
-	print_bootwhat(boot_whatp);
+	//print_bootwhat(boot_whatp);
+	bootinfo_clear_all_settings(&settings);
 
 	switch (boot_whatp->type) {
 	case BIBOOTWHAT_TYPE_PART:
-		printf("BOOTINFO_TYPE_PART: %d", boot_whatp->what.partition);
+		//		printf("BOOTINFO_TYPE_PART: %d", boot_whatp->what.partition);
 		bootinfo_setting_uint8(&settings, "bibootwhat_type_part", 1);
 		bootinfo_setting_uint8(&settings, "bibootwhat_part", boot_whatp->what.partition);
 
 		if (boot_whatp->cmdline[0]) {
 			bootinfo_setting_string(&settings, "bibootwhat_cmdline", boot_whatp->cmdline);
-			printf (" %s", boot_whatp->cmdline);
+			//			printf (" %s", boot_whatp->cmdline);
 		} else {
-			printf ("\n");
+			//			printf ("\n");
 		}
 		break;
 
 	case BIBOOTWHAT_TYPE_WAIT:
-		printf ("BIBOOTWHAT_TYPE_WAIT\n");
+		//		printf ("BIBOOTWHAT_TYPE_WAIT\n");
 		bootinfo_setting_uint8(&settings, "bibootwhat_type_wait", 1);
 		break;
 
 	case BIBOOTWHAT_TYPE_REBOOT:
-		printf ("BIBOOTWHAT_TYPE_REBOOT\n");
+		//		printf ("BIBOOTWHAT_TYPE_REBOOT\n");
 		bootinfo_setting_uint8(&settings, "bibootwhat_type_reboot", 1);
 		break;
 
 	case BIBOOTWHAT_TYPE_AUTO:
-		printf ("BIBOOTWHAT_TYPE_AUTO\n");
+		//		printf ("BIBOOTWHAT_TYPE_AUTO\n");
 		bootinfo_setting_uint8(&settings, "bibootwhat_type_auto", 1);
 		break;
 
 	case BIBOOTWHAT_TYPE_MFS:
-		printf ("BIBOOTWHAT_TYPE_MFS %s\n", boot_whatp->what.mfs);
+		//		printf ("BIBOOTWHAT_TYPE_MFS %s\n", boot_whatp->what.mfs);
 		bootinfo_setting_uint8(&settings, "bibootwhat_type_mfs", 1);
 		bootinfo_setting_string(&settings, "bibootwhat_mfs", boot_whatp->what.mfs);
 		break;
@@ -325,16 +362,16 @@ static int bootinfo_xfer_deliver ( struct bootinfo_request *bootinfo,
  * @v fail		Failure indicator
  */
 static void bootinfo_timer_expired ( struct retry_timer *timer __unused, int fail ) {
-	printf ("bootinfo_timer_expired()\n");
+	//	printf ("bootinfo_timer_expired()\n");
 
 	struct bootinfo_request *bootinfo =
 		container_of ( timer, struct bootinfo_request, timer );
 
 	if ( fail ) {
-		printf ( "bootinfo_timer_expired: calling bootinfo_done\n" );
+		//		printf ( "bootinfo_timer_expired: calling bootinfo_done\n" );
 		bootinfo_done ( bootinfo, -ETIMEDOUT );
 	} else {
-		printf ( "bootinfo_timer_expired: calling bootinfo_send_packet\n" );
+		//		printf ( "bootinfo_timer_expired: calling bootinfo_send_packet\n" );
 		bootinfo_send_packet ( bootinfo );
 	}
 }
@@ -346,7 +383,7 @@ static void bootinfo_timer_expired ( struct retry_timer *timer __unused, int fai
  * @v rc		Reason for close
  */
 static void bootinfo_xfer_close ( struct bootinfo_request *bootinfo __unused, int rc __unused) {
-	printf ("bootinfo_xfer_close()\n");
+	//	printf ("bootinfo_xfer_close()\n");
 
 	if ( ! rc )
 		rc = -ECONNABORTED;
@@ -388,7 +425,7 @@ int create_bootinfo_query ( struct interface * job, const char *hostname ) {
 	struct sockaddr_tcpip local;
 	int rc;
 
-	printf ("Bootinfo query for host %s\n", hostname);
+	//	printf ("Bootinfo query for host %s\n", hostname);
 
 	/* Allocate DNS structure */
 	bootinfo = zalloc ( sizeof ( *bootinfo ) );
@@ -397,14 +434,14 @@ int create_bootinfo_query ( struct interface * job, const char *hostname ) {
 		return rc;
 	}
 
-	printf ("create_bootinfo_query 1 v 0022\n");
+	//printf ("create_bootinfo_query 1 v 0022\n");
 
 	ref_init ( &bootinfo->refcnt, NULL );
 	intf_init ( &bootinfo->request, &bootinfo_request_desc, &bootinfo->refcnt );
 	intf_init ( &bootinfo->socket, &bootinfo_socket_desc, &bootinfo->refcnt );
 	timer_init ( &bootinfo->timer, bootinfo_timer_expired, &bootinfo->refcnt );
 
-	printf ("create_bootinfo_query 2\n");
+	//	printf ("create_bootinfo_query 2\n");
 
 	memset ( &server, 0, sizeof ( server ) );
 	server.st_port = htons ( BOOTWHAT_DSTPORT );
@@ -423,13 +460,13 @@ int create_bootinfo_query ( struct interface * job, const char *hostname ) {
 		return rc;
 	}
 
-	printf ("create_bootinfo_query 3\n");
+	//	printf ("create_bootinfo_query 3\n");
 	/* Start timer to trigger first packet */
 	start_timer_nodelay ( &bootinfo->timer );
 
 	/* Attach parent interface, mortalise self, and return */
 	intf_plug_plug ( &bootinfo->request, job );
 	ref_put ( &bootinfo->refcnt );
-	printf ("create_bootinfo_query 4\n");
+	//	printf ("create_bootinfo_query 4\n");
 	return 0;	
 }

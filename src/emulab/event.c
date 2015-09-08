@@ -116,8 +116,6 @@ struct event_request {
 };
 
 int event ( const char *dst_server,  char *state) {
-	printf ("event(%s, %s)\n", dst_server, state);
-
 	int rc;
 
 	if ( ( rc = create_event ( &monojob, dst_server, state ) ) != 0 ) {
@@ -141,8 +139,6 @@ int event ( const char *dst_server,  char *state) {
  * @v rc		Return status code
  */
 static void event_done ( struct event_request *event, int rc ) {
-	printf ("event_done(%d)\n", rc);
-
 	/* Stop the retry timer */
 	stop_timer ( &event->timer );
 
@@ -158,7 +154,6 @@ static void event_done ( struct event_request *event, int rc ) {
  * @ret rc		Return status code
  */
 static int event_send_packet ( struct event_request *event ) {
-	printf ("event_send_packet(%s)\n", event->state);
 	/* Start retransmission timer */
 	start_timer ( &event->timer );
 	/* Send the data */
@@ -177,9 +172,6 @@ static int event_xfer_deliver ( struct event_request *event,
 				   struct io_buffer *iobuf __unused,
 				   struct xfer_metadata *meta __unused ) {
 	int rc = 0;
-
-	printf ("event_xfer_deliver()\n");
-
 	event_done(event, rc);
 	return 0;
 }
@@ -191,16 +183,12 @@ static int event_xfer_deliver ( struct event_request *event,
  * @v fail		Failure indicator
  */
 static void event_timer_expired ( struct retry_timer *timer, int fail ) {
-	printf ("event_timer_expired()\n");
-
 	struct event_request *event =
 		container_of ( timer, struct event_request, timer );
 
 	if ( fail ) {
-		printf ( "event_timer_expired: calling event_done\n" );
 		event_done ( event, -ETIMEDOUT );
 	} else {
-		printf ( "event_timer_expired: calling event_send_packet\n" );
 		event_send_packet ( event );
 	}
 }
@@ -212,8 +200,6 @@ static void event_timer_expired ( struct retry_timer *timer, int fail ) {
  * @v rc		Reason for close
  */
 static void event_xfer_close ( struct event_request *event, int rc) {
-	printf ("event_xfer_close(%d)\n", rc);
-
 	if ( rc ) {
 		printf ("yo\n");
 		rc = -ECONNABORTED;
@@ -256,7 +242,7 @@ int create_event ( struct interface * job, const char *dst_server,
 	struct sockaddr_tcpip server;
 	int rc;
 
-	printf ("v0008 Event %s being sent to %s\n", state, dst_server);
+	printf ("Sending event %s to %s\n", state, dst_server);
 
 	/* Allocate event structure */
 	event = zalloc ( sizeof ( *event ) );

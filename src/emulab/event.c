@@ -263,7 +263,7 @@ int create_event ( struct interface * job, const char *dst_server,
 	// Instead, we use vsnprintf to set the header and strncpy to 
 	// concatenate the state onto the end of the payload
 	memset(event->state, 0, MAX_EVENT_STATE_SIZE);
-	vsnprintf(event->state, MAX_EVENT_STATE_SIZE, "VERSION=39 state ", state);
+	vsnprintf(event->state, MAX_EVENT_STATE_SIZE, "VERSION=37 state ", state);
 	size_t offset = strlen(event->state);
 	strncpy ( event->state + offset, state, MAX_EVENT_STATE_SIZE - offset );
 

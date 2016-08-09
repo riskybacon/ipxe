@@ -80,6 +80,7 @@ The event subsystem was created by using tcpdump to watch event packets on the w
 
 I would like to thank the [Flux Research Group](https://www.flux.utah.edu) at [The University of Utah](http://www.utah.edu) for their work on [Emulab](http://www.emulab.net). It's a great piece of software.
 
+I would also like to thank all of the people that develop [iPXE](http://ipxe.org). The code is exceptionally easy to work with and is very high quality.
 
 # Financial Support
 
